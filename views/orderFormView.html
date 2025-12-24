@@ -1,0 +1,111 @@
+<!-- Order Form View -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <button class="btn btn-secondary" onclick="showView('orders')">← Назад к заказам</button>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Новый заказ</h5>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="orderCustomer" class="form-label">Клиент</label>
+                        <select class="form-control" id="orderCustomer" required>
+                            <option value="">Выберите клиента</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <button class="btn btn-secondary mt-4" data-bs-toggle="modal" data-bs-target="#newCustomerModal">Добавить нового клиента</button>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="orderProduct" class="form-label">Товар</label>
+                        <select class="form-control" id="orderProduct" required>
+                            <option value="">Выберите товар</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="orderQuantity" class="form-label">Количество</label>
+                        <input type="number" class="form-control" id="orderQuantity" value="1" min="1">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="button" class="btn btn-primary mt-4" onclick="addOrderPosition()">Добавить</button>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <small>Цена товара: <span id="selectedPrice">0.00</span> руб.</small>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <small>Сумма позиции: <span id="selectedLineTotal">0.00</span> руб.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>Позиции заказа</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Товар</th>
+                                <th>Количество</th>
+                                <th>Цена</th>
+                                <th>Сумма</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orderPositionsBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="row">
+                    <div class="col-md-6"></div>
+                    <div class="col-md-6">
+                        <h5>Итого: <span id="orderTotal">0</span> руб.</h5>
+                    </div>
+                </div>
+                <button class="btn btn-success" onclick="saveOrder()">Сохранить заказ</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Customer Modal -->
+<div class="modal fade" id="newCustomerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Добавить нового клиента</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="newCustomerForm">
+                    <div class="mb-3">
+                        <label for="newCustomerName" class="form-label">ФИО</label>
+                        <input type="text" class="form-control" id="newCustomerName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newCustomerPhone" class="form-label">Телефон</label>
+                        <input type="tel" class="form-control" id="newCustomerPhone" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                <button type="button" class="btn btn-primary" onclick="createNewCustomer()">Создать</button>
+            </div>
+        </div>
+    </div>
+</div>

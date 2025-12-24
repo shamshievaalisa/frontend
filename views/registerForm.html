@@ -1,0 +1,39 @@
+<div class="row justify-content-center" id="registerDiv" style="display: none;">
+    <div class="col-md-5">
+        <h2 class="text-center mb-4">Регистрация</h2>
+        <form id="registerForm" novalidate>
+            <!-- Name input -->
+            <div class="mb-3">
+                <label for="name" class="form-label">Полное имя</label>
+                <input type="text" class="form-control" id="name" name="name" required>
+            </div>
+            <!-- Email input -->
+            <div class="mb-3">
+                <label for="emailReg" class="form-label">Email адрес</label>
+                <input type="email" class="form-control" id="emailReg" name="emailReg" placeholder="name@example.com" required>
+            </div>
+            <!-- Password input -->
+            <div class="mb-3">
+                <label for="passwordReg" class="form-label">Пароль</label>
+                <input type="password" class="form-control" id="passwordReg" name="passwordReg" required>
+            </div>
+            <!-- Confirm Password input -->
+            <div class="mb-3">
+                <label for="passwordConfirm" class="form-label">Подтверждение пароля</label>
+                <input type="password" class="form-control" id="passwordConfirm" name="passwordConfirm" required>
+            </div>
+            <!-- Checkbox example https://getbootstrap.com/docs/5.1/forms/checks-radios/ -->
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" id="agreeTerms" required>
+                <label class="form-check-label" for="agreeTerms">
+                    Я согласен с условиями использования
+                </label>
+            </div>
+            <!-- Submit button -->
+            <button type="submit" class="btn btn-success w-100">Зарегистрироваться</button>
+        </form>
+        <div class="text-center mt-3">
+            <p>Уже есть аккаунт? <a href="#" onclick="showLogin(); return false;">Вход</a></p>
+        </div>
+    </div>
+</div>

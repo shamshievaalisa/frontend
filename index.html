@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<!-- Система управления товарами и заказами -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Система управления товарами</title>
+  </head>
+  <body>
+    <!-- Navigation -->
+    <nav
+      class="navbar navbar-expand-lg navbar-dark bg-dark"
+      id="navbar"
+      style="display: none"
+    >
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">Управление товарами</a>
+        <button
+          class="navbar-toggler"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#navbarNav"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item">
+              <a class="nav-link" href="#" onclick="showView('products')"
+                >Товары</a
+              >
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" onclick="showView('orders')"
+                >Заказы</a
+              >
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" onclick="showView('categories')"
+                >Категории</a
+              >
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" onclick="showView('customers')"
+                >Клиенты</a
+              >
+            </li>
+            <li class="nav-item" id="adminMenu" style="display: none">
+              <a class="nav-link" href="#" onclick="showView('users')"
+                >Пользователи</a
+              >
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" onclick="showView('about')">О проекте</a>
+            </li>
+            <li class="nav-item">
+              <span class="navbar-text me-3" id="userInfo"></span>
+              <a class="nav-link" href="#" onclick="logout()">Выход</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Views Container -->
+    <div class="container mt-4" id="viewsContainer">
+      <!-- Login View will be loaded here -->
+    </div>
+
+    <!-- Modules loading overlay (blocks interaction until modules are ready) -->
+    <div
+      id="modulesLoadingOverlay"
+      style="
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.7);
+        z-index: 2000;
+        font-size: 1.25rem;
+      "
+    >
+      Загружаются модули, подождите...
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // Defensive: block accidental navigations to /dashboard.html and log callers
+      (function () {
+        const shouldBlock = (url) =>
+          typeof url === "string" && url.indexOf("dashboard.html") !== -1;
+
+        const wrap = (obj, name) => {
+          try {
+            const orig = obj[name];
+            obj[name] = function (url) {
+              if (shouldBlock(url)) {
+                const st = new Error().stack;
+                console.warn("Blocked navigation to", url, "\nStack:", st);
+                if (typeof showView === "function") showView("products");
+                return;
+              }
+              return orig.apply(this, arguments);
+            };
+          } catch (e) {
+            // ignore
+          }
+        };
+
+        wrap(window.location, "assign");
+        wrap(window.location, "replace");
+
+        // Try to detect direct href assignments (best-effort)
+        try {
+          Object.defineProperty(window, "_hrefSetter", {
+            configurable: true,
+            value: function (val) {
+              if (shouldBlock(val)) {
+                console.warn("Blocked assignment to location.href ->", val);
+                if (typeof showView === "function") showView("products");
+                return;
+              }
+              window.location.assign(val);
+            },
+          });
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
+    <script>
+      // Load views dynamically
+      const views = [
+        "views/loginView.html",
+        "views/aboutView.html",
+        "views/productsView.html",
+        "views/productDetailsView.html",
+        "views/categoriesView.html",
+        "views/customersView.html",
+        "views/ordersView.html",
+        "views/orderFormView.html",
+        "views/usersView.html",
+      ];
+
+      let loadedViews = {};
+      let currentUser = null;
+
+      // User roles
+      const ROLES = {
+        ADMIN: "ADMIN",
+        MANAGER: "MANAGER",
+      };
+
+      // Load all views
+      function loadAllViews() {
+        let loadedCount = 0;
+        views.forEach((viewPath) => {
+          fetch(viewPath)
+            .then((response) => response.text())
+            .then((html) => {
+              const viewName = viewPath.split("/")[1].replace("View.html", "");
+              loadedViews[viewName] = html;
+              loadedCount++;
+              if (loadedCount === views.length) {
+                initializeApp();
+              }
+            });
+        });
+      }
+
+      function initializeApp() {
+        // If user already has JWT, restore SPA state and go to requested view
+        const token = localStorage.getItem("jwt");
+        function parseJwt(t) {
+          try {
+            const payload = t.split(".")[1];
+            const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+            return JSON.parse(decodeURIComponent(escape(json)));
+          } catch (e) {
+            return null;
+          }
+        }
+
+        if (token) {
+          const payload = parseJwt(token);
+          let role = null;
+          if (
+            payload &&
+            (payload.role || payload.roles || payload.authorities)
+          ) {
+            role = payload.role || payload.roles || payload.authorities;
+            if (Array.isArray(role)) role = role[0];
+            if (typeof role === "string" && role.startsWith("ROLE_"))
+              role = role.substring(5);
+            role = role.toUpperCase();
+          }
+
+          currentUser = {
+            username:
+              payload && (payload.sub || payload.username)
+                ? payload.sub || payload.username
+                : "user",
+            role: role ? role : "MANAGER",
+          };
+
+          // Show navbar + admin menu if needed
+          const navbarEl = document.getElementById("navbar");
+          const userInfoEl = document.getElementById("userInfo");
+          if (navbarEl) navbarEl.style.display = "block";
+          if (userInfoEl)
+            userInfoEl.textContent = `${currentUser.username} (${currentUser.role})`;
+          if (currentUser.role === "ADMIN") {
+            const adminMenu = document.getElementById("adminMenu");
+            if (adminMenu) adminMenu.style.display = "block";
+          }
+
+          // Determine desired view: URL param `view`, hash, sessionStorage, or default 'products'
+          const urlParams = new URLSearchParams(window.location.search);
+          let desired =
+            urlParams.get("view") ||
+            (window.location.hash
+              ? window.location.hash.replace("#", "")
+              : null) ||
+            sessionStorage.getItem("lastView") ||
+            "products";
+          showView(desired);
+          return;
+        }
+
+        // Not logged in -> show login
+        showView("login");
+      }
+
+      function showView(viewName) {
+        const container = document.getElementById("viewsContainer");
+        if (loadedViews[viewName]) {
+          container.innerHTML = loadedViews[viewName];
+          // store last view
+          try {
+            sessionStorage.setItem("lastView", viewName);
+          } catch (e) {}
+
+          // Execute any inline scripts contained in the loaded view HTML.
+          // Scripts added via innerHTML do not execute automatically, so we recreate them.
+          (function runViewScripts() {
+            const scripts = Array.from(container.querySelectorAll("script"));
+            scripts.forEach((s) => {
+              try {
+                const newScript = document.createElement("script");
+                // copy attributes
+                for (let i = 0; i < s.attributes.length; i++) {
+                  const attr = s.attributes[i];
+                  newScript.setAttribute(attr.name, attr.value);
+                }
+                if (s.src) {
+                  // external script: append to head to execute
+                  newScript.async = false;
+                  newScript.src = s.src;
+                  document.head.appendChild(newScript);
+                } else {
+                  // inline script: set text and append to container so it executes
+                  newScript.text = s.textContent;
+                  s.parentNode.replaceChild(newScript, s);
+                }
+              } catch (e) {
+                console.warn("Failed to run view script", e);
+              }
+            });
+          })();
+
+          // Initialize view-specific logic
+          if (viewName === "login") {
+            initLoginView();
+          } else if (viewName === "products") {
+            initProductsView();
+          } else if (viewName === "categories") {
+            initCategoriesView();
+          } else if (viewName === "customers") {
+            initCustomersView();
+          } else if (viewName === "orders") {
+            initOrdersView();
+          } else if (viewName === "productDetails") {
+            initProductDetailsView();
+          } else if (viewName === "orderForm") {
+            initOrderFormView();
+          }
+          else if (viewName === "about") {
+            const overlay = document.getElementById('modulesLoadingOverlay');
+            if (overlay) overlay.parentNode.removeChild(overlay);
+          }
+          else if (viewName === "users") {
+            // Check if user is admin
+            if (currentUser && currentUser.role === ROLES.ADMIN) {
+              initUsersView();
+            } else {
+              alert(
+                "Доступ запрещен. Только администраторы могут управлять пользователями."
+              );
+              showView("products");
+            }
+          }
+        }
+      }
+
+      // Placeholder initialization functions - may be filled by modules
+      function initLoginView() {
+        // If module provided an initializer, call it. Otherwise, fallback to mock behavior.
+        if (typeof window.initLoginView === "function") {
+          window.initLoginView();
+          return;
+        }
+
+        const form = document.getElementById("loginForm");
+        if (form) {
+          form.addEventListener("submit", function (e) {
+            e.preventDefault();
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            // TODO: Send to backend
+            console.log("Login:", username, password);
+
+            // Mock user data - в реальности получается с бэкенда
+            currentUser = {
+              id: 1,
+              username: username,
+              email: username + "@example.com",
+              role: username === "admin" ? ROLES.ADMIN : ROLES.SELLER,
+            };
+
+            // Show navbar and set user info
+            document.getElementById("navbar").style.display = "block";
+            document.getElementById(
+              "userInfo"
+            ).textContent = `${username} (${currentUser.role})`;
+
+            // Show admin menu if admin
+            if (currentUser.role === ROLES.ADMIN) {
+              document.getElementById("adminMenu").style.display = "block";
+            }
+
+            showView("products");
+          });
+        }
+      }
+
+
+
+      function logout() {
+        currentUser = null;
+        document.getElementById("navbar").style.display = "none";
+        document.getElementById("adminMenu").style.display = "none";
+        showView("login");
+      }
+
+      // Load all view scripts
+      const viewScripts = [
+        "modules/loginHandler.js",
+         "modules/productsView.js",
+        "modules/categoriesView.js",
+        "modules/customersView.js",
+         "modules/ordersView.js",
+        "modules/usersView.js",
+      ];
+
+      // Ensure minimal global stubs so inline onclicks don't crash before modules load
+      window.saveUser =
+        window.saveUser ||
+        function () {
+          console.warn("saveUser called before module loaded");
+        };
+      window.editUser =
+        window.editUser ||
+        function (id) {
+          console.warn("editUser called before module loaded", id);
+        };
+      window.deleteUser =
+        window.deleteUser ||
+        function (id) {
+          console.warn("deleteUser called before module loaded", id);
+        };
+
+      // Load all view scripts and only after they are loaded, load views
+      let scriptsLoaded = 0;
+      viewScripts.forEach((src) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => {
+          scriptsLoaded++;
+          if (scriptsLoaded === viewScripts.length) {
+            // All scripts are loaded and executed — now remove stubs, hide overlay and load views
+            const overlay = document.getElementById("modulesLoadingOverlay");
+            if (overlay) overlay.style.display = "none";
+            loadAllViews();
+          }
+        };
+        script.onerror = (e) => {
+          console.error("Failed to load script", src, e);
+          scriptsLoaded++;
+          if (scriptsLoaded === viewScripts.length) loadAllViews();
+        };
+        document.head.appendChild(script);
+      });
+
+      // Заглушки для всех возможных init-функций
+const neededInits = ['initCustomersView', 'initUsersView'];
+neededInits.forEach(name => {
+  if (typeof window[name] !== 'function') {
+    window[name] = () => console.warn(`${name} not loaded yet`);
+  }
+});
+    </script>
+  </body>
+</html>

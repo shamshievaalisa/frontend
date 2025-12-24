@@ -1,0 +1,731 @@
+// modules/ordersView.js
+
+(function () {
+  const API_BASE = "http://localhost:8081";
+  const API_URL_ORDERS = API_BASE + "/orders";
+  const API_URL_CLIENTS = API_BASE + "/clients";
+  const API_URL_CURRENT_USER = API_BASE + "/users/me"; // ← НОВОЕ
+  const API_URL_PRODUCTS = API_BASE + "/products";
+
+  let allOrders = [];
+  let allClients = [];
+  let allProducts = [];
+  let allEmployees = [];
+  let currentUser = null;
+  let currentEmployeeId = null; // ← ID текущего сотрудника
+  let currentOrderId = null;
+  let orderTempItems = []; // временный список позиций в модалке
+
+  function getToken() {
+    return localStorage.getItem("jwt");
+  }
+
+  const formatDate = (dateStr) => (dateStr ? dateStr.split("T")[0] : "");
+
+  // === ЗАГРУЗКА ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ ===
+  async function loadCurrentUser() {
+    const token = getToken();
+    if (!token) {
+      // Если JWT отсутствует, попробуем взять информацию из глобального currentUser (mock login)
+      if (window.currentUser) {
+        currentUser = window.currentUser;
+        currentEmployeeId = currentUser.id;
+        console.warn('JWT отсутствует, используем window.currentUser как fallback', currentUser);
+        return currentUser;
+      }
+
+      console.error("Токен отсутствует в localStorage");
+      alert("Вы не авторизованы. Пожалуйста, войдите в систему.");
+      return null;
+    }
+
+    try {
+      const response = await fetch(API_URL_CURRENT_USER, {
+        headers: { Authorization: "Bearer " + token },
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        console.error("Ошибка /users/me:", response.status, text);
+        // При 401 очистим токен и направим на логин
+        if (response.status === 401) {
+          try {
+            localStorage.removeItem('jwt');
+          } catch (e) {}
+          alert("Ошибка авторизации. Попробуйте войти заново.");
+          if (typeof window.showView === 'function') window.showView('login');
+          return null;
+        }
+        alert("Не удалось определить пользователя");
+        return null;
+      }
+
+      const user = await response.json();
+      if (user.id == null) {
+        console.error("В ответе нет id:", user);
+        alert("Ошибка данных пользователя");
+        return null;
+      }
+
+      currentEmployeeId = user.id;
+      currentUser = user;
+      console.log(
+        "Текущий сотрудник загружен:",
+        user.fullName,
+        "(ID:",
+        user.id,
+        ")"
+      );
+      return user;
+    } catch (e) {
+      console.error("Ошибка загрузки текущего пользователя:", e);
+      alert("Не удалось определить текущего сотрудника");
+      return null;
+    }
+  }
+
+
+  async function loadReferenceData() {
+    const token = getToken();
+    const headers = { Authorization: "Bearer " + token };
+
+    try {
+      const [clientsRes, productsRes] = await Promise.all([
+        fetch(API_URL_CLIENTS, { headers }),
+        fetch(API_URL_PRODUCTS, { headers }),
+      ]);
+
+      if (!clientsRes.ok || !productsRes.ok) {
+        throw new Error("Ошибка загрузки справочников");
+      }
+
+      allClients = await clientsRes.json();
+      allProducts = await productsRes.json();
+
+      renderClientsSelect();
+      renderProductSelect();
+    } catch (e) {
+      console.error("Ошибка загрузки справочников:", e);
+      alert("Не удалось загрузить клиентов или товары");
+    }
+  }
+
+
+  function renderClientsSelect() {
+    const select = document.getElementById("orderClientId");
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Выберите клиента</option>';
+    allClients.forEach((client) => {
+      const option = document.createElement("option");
+      option.value = client.id;
+      option.textContent =
+        client.fullName || client.name || `Клиент ${client.id}`;
+      select.appendChild(option);
+    });
+  }
+
+  function renderProductSelect() {
+    const select = document.getElementById("orderProductSelect");
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Выберите товар</option>';
+    allProducts.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `${p.name} — ${p.price} ₽`;
+      opt.dataset.price = p.price;
+      select.appendChild(opt);
+    });
+  }
+
+
+async function loadOrders() {
+  const tbody = document.getElementById("ordersTableBody");
+  if (!tbody) return;
+
+  const showRow = (html) => {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center">${html}</td></tr>`;
+  };
+
+  showRow("Загрузка...");
+
+  const token = getToken();
+  if (!token) {
+    console.error("❌ Токен отсутствует при загрузке заказов");
+    showRow('<span class="text-danger">Нет авторизации</span>');
+    return;
+  }
+
+  // На всякий случай убедимся, что currentUser/currentEmployeeId заполнены
+  if (!currentUser || !currentEmployeeId) {
+    await loadCurrentUser();
+  }
+
+  const headers = { Authorization: "Bearer " + token };
+
+  // Роль берём из currentUser, а если её нет — из JWT
+  const parseJwt = (t) => {
+    try {
+      const payload = t.split(".")[1];
+      const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+      return JSON.parse(decodeURIComponent(escape(json)));
+    } catch {
+      return null;
+    }
+  };
+
+  const getEffectiveRole = () => {
+    let role = currentUser && currentUser.role ? String(currentUser.role) : null;
+    if (!role) {
+      const p = parseJwt(token);
+      role = p?.role || p?.roles || p?.authorities || null;
+      if (Array.isArray(role)) role = role[0];
+    }
+    role = role ? String(role) : "";
+    if (role.startsWith("ROLE_")) role = role.slice(5);
+    return role.toUpperCase();
+  };
+
+  const role = getEffectiveRole();
+  const isManager = role === "MANAGER";
+
+  const ordersUrl =
+    isManager && currentEmployeeId != null
+      ? `${API_URL_ORDERS}?employeeId=${encodeURIComponent(currentEmployeeId)}`
+      : API_URL_ORDERS;
+
+  try {
+    console.log("📡 Запрашиваем:", {
+      ordersUrl,
+      clients: API_URL_CLIENTS,
+      employees: isManager ? "skipped" : `${API_BASE}/users`,
+      role,
+      currentEmployeeId,
+    });
+
+    // orders + clients всегда нужны, employees — только админу
+    const [ordersRes, clientsRes, employeesRes] = await Promise.all([
+      fetch(ordersUrl, { headers }),
+      fetch(API_URL_CLIENTS, { headers }),
+      isManager ? Promise.resolve(null) : fetch(`${API_BASE}/users`, { headers }),
+    ]);
+
+    console.log("📊 Статусы ответов:", {
+      orders: ordersRes.status,
+      clients: clientsRes.status,
+      employees: employeesRes ? employeesRes.status : "skipped",
+    });
+
+  
+    const handleAuthFail = async (res) => {
+      if (res.status === 401) {
+        try { localStorage.removeItem("jwt"); } catch (e) {}
+        alert("Ошибка авторизации. Войдите заново.");
+        if (typeof window.showView === "function") window.showView("login");
+        return true;
+      }
+      return false;
+    };
+
+    if (await handleAuthFail(ordersRes)) return;
+    if (await handleAuthFail(clientsRes)) return;
+
+    // Критично: orders + clients
+    if (!ordersRes.ok) {
+      const text = await ordersRes.text().catch(() => "");
+      console.error("❌ Ошибка /orders:", ordersRes.status, text);
+      showRow('<span class="text-danger">Ошибка загрузки заказов</span>');
+      return;
+    }
+    if (!clientsRes.ok) {
+      const text = await clientsRes.text().catch(() => "");
+      console.error("❌ Ошибка /clients:", clientsRes.status, text);
+      showRow('<span class="text-danger">Ошибка загрузки клиентов</span>');
+      return;
+    }
+
+    // Не критично: employees (для MANAGER пропускаем, для ADMIN может упасть — не валим страницу)
+    if (employeesRes && !employeesRes.ok) {
+      const text = await employeesRes.text().catch(() => "");
+      console.warn("⚠️ Не удалось загрузить /users:", employeesRes.status, text);
+    }
+
+    allOrders = await ordersRes.json();
+    allClients = await clientsRes.json();
+
+    if (isManager) {
+      // чтобы имя сотрудника не было "—" и не нужен /users
+      allEmployees = currentUser ? [currentUser] : [];
+    } else {
+      allEmployees = employeesRes && employeesRes.ok ? await employeesRes.json() : [];
+    }
+
+    console.log("✅ Заказы загружены:", allOrders.length);
+    displayOrders(allOrders);
+  } catch (e) {
+    console.error("💥 Ошибка в loadOrders:", e);
+    showRow('<span class="text-danger">Ошибка загрузки</span>');
+  }
+}
+
+  function getClientNameById(id) {
+    const c = allClients.find((x) => x.id === id);
+    return c ? c.fullName || c.name || "—" : "—";
+  }
+
+function getEmployeeNameById(id) {
+  // null/undefined/"" -> нет данных
+  if (id == null || id === "") return "—";
+
+  const empId = Number(id);
+
+  // 1) Если это текущий пользователь — показываем его имя даже без /users
+  if (currentUser && currentEmployeeId != null && empId === Number(currentEmployeeId)) {
+    return (
+      currentUser.fullName ||
+      currentUser.login ||
+      currentUser.username ||
+      `Сотрудник ${empId}`
+    );
+  }
+
+  // 2) Ищем в справочнике сотрудников (только у ADMIN или если вы его наполняете)
+  if (Array.isArray(allEmployees) && allEmployees.length > 0) {
+    const user = allEmployees.find((u) => Number(u.id) === empId);
+    if (user) {
+      return user.fullName || user.login || user.username || `Сотрудник ${empId}`;
+    }
+  }
+
+  // 3) Если ничего не нашли — показываем нейтрально
+  return `Сотрудник ${empId}`;
+}
+
+  function getProductNameById(id) {
+    const p = allProducts.find((x) => x.id === id);
+    return p ? p.name : "—";
+  }
+
+  function displayOrders(orders) {
+    const tbody = document.getElementById("ordersTableBody");
+    if (!tbody) return;
+
+    if (!orders || orders.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" class="text-center">Заказы не найдены</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = orders
+      .map(
+        (o) => `
+        <tr>
+            <td>${o.id || ""}</td>
+            <td>${formatDate(o.date) || "—"}</td>
+            <td>${getClientNameById(o.clientId) || "—"}</td>
+            <td>${getEmployeeNameById(o.employeeId) || "—"}</td>
+            <td>
+                <button class="btn btn-sm btn-info me-1" onclick="viewOrderItems(${
+                  o.id
+                })">Позиции</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteOrder(${
+                  o.id
+                })">Удалить</button>
+            </td>
+        </tr>
+    `
+      )
+      .join("");
+  }
+
+  // === ПОИСК ===
+  function filterOrders() {
+    const term =
+      document.getElementById("searchOrders")?.value?.toLowerCase() || "";
+    const filtered = allOrders.filter(
+      (o) =>
+        String(o.id).includes(term) ||
+        formatDate(o.date).includes(term) ||
+        getClientNameById(o.clientId).toLowerCase().includes(term) ||
+        (o.employeeName || "").toLowerCase().includes(term)
+    );
+    displayOrders(filtered);
+  }
+
+function calculateOrderTotal() {
+  let total = 0;
+  for (const item of orderTempItems) {
+    total += item.quantity * item.priceAtMoment;
+  }
+  document.getElementById("orderTotal").textContent = total.toFixed(2);
+}
+
+async function loadOrderItems(orderId) {
+    const tbody = document.getElementById("orderItemsTableBody");
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Загрузка...</td></tr>';
+
+    const token = getToken();
+    const headers = { "Authorization": "Bearer " + token };
+
+    try {
+        // Загружаем ПОЗИЦИИ и ТОВАРЫ одновременно
+        const [itemsRes, productsRes] = await Promise.all([
+            fetch(`${API_BASE}/order-items?orderId=${orderId}`, { headers }),
+            fetch(API_URL_PRODUCTS, { headers })
+        ]);
+
+        if (!itemsRes.ok || !productsRes.ok) {
+            throw new Error("Ошибка загрузки данных");
+        }
+
+        const items = await itemsRes.json();
+        allProducts = await productsRes.json(); // ← сохраняем в глобальный массив
+
+        displayOrderItems(items, orderId);
+    } catch (e) {
+        console.error("Ошибка загрузки позиций:", e);
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Ошибка</td></tr>';
+    }
+}
+  function displayOrderItems(items, orderId) {
+    const tbody = document.getElementById("orderItemsTableBody");
+    if (!tbody) return;
+
+    if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">Позиции отсутствуют</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => `
+        <tr>
+            <td>${item.id}</td>
+            <td>${getProductNameById(item.productId)}</td>
+            <td>${item.quantity}</td>
+            <td>${item.priceAtMoment} ₽</td>
+            <td>${(item.quantity * item.priceAtMoment).toFixed(2)} ₽</td>
+            <td>
+                <select class="form-select form-select-sm status-select" 
+                        data-item-id="${item.id}" 
+                        onchange="updateOrderItemStatus(${item.id}, this.value)">
+                    <option value="NEW" ${item.status === 'NEW' ? 'selected' : ''}>Новый</option>
+                    <option value="IN_PROGRESS" ${item.status === 'IN_PROGRESS' ? 'selected' : ''}>В работе</option>
+                    <option value="DONE" ${item.status === 'DONE' ? 'selected' : ''}>Выполнен</option>
+                    <option value="CANCELED" ${item.status === 'CANCELED' ? 'selected' : ''}>Отказ</option>
+                </select>
+            </td>
+            <td>
+                <button class="btn btn-sm btn-danger" onclick="deleteOrderItem(${orderId}, ${item.id})">Удалить</button>
+            </td>
+        </tr>
+    `).join("");
+}
+
+window.updateOrderItemStatus = async function (itemId, newStatus) {
+    const token = getToken();
+    if (!token) {
+        alert("Нет авторизации");
+        return;
+    }
+
+    try {
+        // Отправляем обновление статуса
+        const response = await fetch(`${API_BASE}/order-items/${itemId}`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token
+            },
+            body: JSON.stringify({
+                quantity: 1, // ← временно, пока нет редактирования количества
+                priceAtMoment: 0, // ← временно
+                status: newStatus
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.text().catch(() => "Ошибка сервера");
+            throw new Error("Не удалось обновить статус: " + error);
+        }
+
+        console.log(`✅ Статус позиции ${itemId} обновлён на: ${newStatus}`);
+
+        // Обновляем только эту строку (опционально), или перезагружаем весь список
+        await loadOrderItems(currentOrderId); // ← самый простой способ
+    } catch (e) {
+        console.error("Ошибка обновления статуса:", e);
+        alert("Ошибка: " + e.message);
+    }
+};
+  // === ГЛОБАЛЬНЫЕ ФУНКЦИИ ===
+  window.newOrder = async function () {
+    // Сначала загружаем текущего пользователя
+    const currentUser = await loadCurrentUser();
+    if (!currentUser || !currentEmployeeId) return;
+
+    // Очистка товаров (в DOM и в памяти)
+    orderTempItems = [];
+    const listEl = document.getElementById("orderProductList");
+    if (listEl) listEl.innerHTML = "";
+
+    // Загрузка клиентов и товаров
+    await loadReferenceData();
+
+    // Установка даты
+    document.getElementById("orderId").value = "";
+    document.getElementById("orderDate").value = new Date()
+      .toISOString()
+      .split("T")[0];
+
+    // Скрыть или отключить поле сотрудника (опционально)
+    const employeeInfo = document.getElementById("currentEmployeeInfo");
+    if (employeeInfo) {
+      employeeInfo.textContent =
+        currentUser.fullName || currentUser.username || "Текущий пользователь";
+    }
+
+    // Заголовок
+    const modalTitle = document.getElementById("orderModalTitle");
+    if (modalTitle) modalTitle.textContent = "Создать заказ";
+
+    // Показать модалку
+    const modal = new bootstrap.Modal(document.getElementById("orderModal"));
+    modal.show();
+  };
+
+  window.addProductToOrder = function () {
+    console.log("📥 Нажата кнопка 'Добавить товар'");
+
+    const select = document.getElementById("orderProductSelect");
+    const qtyInput = document.getElementById("orderProductQuantity");
+
+    if (!select || !qtyInput) {
+      console.error("❌ Элементы формы не найдены!");
+      alert("Форма не готова");
+      return;
+    }
+
+    const productId = parseInt(select.value);
+    const quantity = parseInt(qtyInput.value);
+
+    console.log("Выбрано: productId =", productId, ", quantity =", quantity);
+
+    if (!productId || isNaN(quantity) || quantity <= 0) {
+      alert("Выберите товар и укажите количество (> 0)");
+      return;
+    }
+
+    console.log("Все товары:", allProducts);
+    const product = allProducts.find((p) => p.id === productId);
+    if (!product) {
+      console.error("❌ Товар с ID", productId, "не найден в allProducts");
+      alert("Товар не найден");
+      return;
+    }
+
+    const item = {
+      productId: product.id,
+      productName: product.name,
+      quantity: quantity,
+      priceAtMoment: Number(product.price),
+    };
+
+    // Добавляем в массив
+    orderTempItems.push(item);
+    console.log(
+      "✅ Товар добавлен в orderTempItems. Всего:",
+      orderTempItems.length
+    );
+
+    // Обновляем отображение
+    renderOrderProductList();
+calculateOrderTotal(); 
+    // Сброс
+    select.value = "";
+    qtyInput.value = "1";
+  };
+
+  function renderOrderProductList() {
+    const list = document.getElementById("orderProductList");
+    if (!list) return;
+
+    list.innerHTML = "";
+    orderTempItems.forEach((item, idx) => {
+      const li = document.createElement("li");
+      li.className =
+        "list-group-item d-flex justify-content-between align-items-center";
+      li.dataset.item = JSON.stringify(item);
+      li.innerHTML = `
+            ${item.productName} × ${item.quantity} по ${item.priceAtMoment} ₽
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeProductFromOrder(${idx})">×</button>
+        `;
+      list.appendChild(li);
+    });
+
+    console.log(
+      "🎨 DOM обновлён. Отображается",
+      orderTempItems.length,
+      "товар(ов)"
+    );
+  }
+
+  window.removeProductFromOrder = function (index) {
+    if (index == null || index < 0 || index >= orderTempItems.length) return;
+    orderTempItems.splice(index, 1);
+    renderOrderProductList();
+    calculateOrderTotal(); 
+  };
+  window.saveOrder = async function () {
+    const date = document.getElementById("orderDate").value;
+    const clientId = parseInt(document.getElementById("orderClientId").value);
+    const items = orderTempItems.slice();
+
+    if (!date || !clientId || !currentEmployeeId) {
+      alert("Не хватает данных: дата, клиент или сотрудник");
+      return;
+    }
+    if (items.length === 0) {
+      alert("Добавьте хотя бы один товар");
+      return;
+    }
+
+    const token = getToken();
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + token,
+    };
+
+    try {
+      // === ШАГ 1: Создать заказ ===
+      const orderData = {
+        date: date,
+        clientId: clientId,
+        employeeId: currentEmployeeId,
+        // НЕТ items здесь!
+      };
+
+      console.log("📤 Создание заказа:", orderData);
+      const orderRes = await fetch(API_URL_ORDERS, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(orderData),
+      });
+
+      if (!orderRes.ok) {
+        const error = await orderRes.text().catch(() => "Ошибка сервера");
+        throw new Error("Ошибка создания заказа: " + error);
+      }
+
+      const createdOrder = await orderRes.json();
+      const orderId = createdOrder.id;
+      console.log("✅ Заказ создан с ID:", orderId);
+
+      // === ШАГ 2: Создать позиции ===
+      for (const item of items) {
+        const orderItemDto = {
+          orderId: orderId, // ← теперь известен!
+          productId: item.productId,
+          quantity: item.quantity,
+          priceAtMoment: item.priceAtMoment,
+          status: "NEW", // ← обязательно!
+        };
+
+        console.log("📤 Создание позиции:", orderItemDto);
+        const itemRes = await fetch(API_BASE + "/order-items", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(orderItemDto),
+        });
+
+        if (!itemRes.ok) {
+          const error = await itemRes.text().catch(() => "Ошибка сервера");
+          throw new Error("Ошибка создания позиции: " + error);
+        }
+      }
+
+      console.log("✅ Все позиции сохранены");
+
+      // Закрыть модалку и обновить список
+      bootstrap.Modal.getInstance(document.getElementById("orderModal")).hide();
+      await loadOrders();
+    } catch (err) {
+      console.error("💥 Ошибка при создании заказа или позиций:", err);
+      alert("Ошибка: " + err.message);
+    }
+  };
+
+  window.viewOrderItems = async function (orderId) {
+    currentOrderId = orderId;
+    const modal = new bootstrap.Modal(
+      document.getElementById("orderItemsModal")
+    );
+    modal.show();
+    await loadOrderItems(orderId);
+  };
+
+window.deleteOrderItem = async function (orderId, itemId) {
+    if (!confirm("Удалить позицию?")) return;
+
+    const token = getToken();
+    try {
+        // Правильный URL для удаления позиции — по её ID
+        const response = await fetch(`${API_BASE}/order-items/${itemId}`, {
+            method: "DELETE",
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (response.ok) {
+            await loadOrderItems(orderId);
+        } else {
+            alert("Не удалось удалить позицию");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка соединения");
+    }
+};
+
+  window.deleteOrder = async function (id) {
+    if (!confirm("Удалить весь заказ?")) return;
+
+    const token = getToken();
+    try {
+      const response = await fetch(`${API_URL_ORDERS}/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer " + token },
+      });
+
+      if (response.ok) {
+        await loadOrders();
+      } else {
+        alert("Не удалось удалить заказ");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка соединения");
+    }
+  };
+
+  window.initOrdersView = async function () {
+    // Сначала загрузим текущего пользователя, затем справочники и заказы
+    await loadCurrentUser();
+
+    // Загружаем товары один раз при старте
+    const token = getToken();
+    const productsRes = await fetch(API_URL_PRODUCTS, {
+      headers: { Authorization: "Bearer " + token },
+    });
+    if (productsRes.ok) {
+      allProducts = await productsRes.json();
+    }
+
+    // Загрузим справочники (clients/products) внутри loadOrders — но можно подгрузить отдельно
+    await loadOrders();
+    const searchInput = document.getElementById("searchOrders");
+    if (searchInput) {
+      searchInput.addEventListener("input", filterOrders);
+    }
+  };
+})();

@@ -1,0 +1,138 @@
+<div class="row mb-4">
+  <div class="col-md-8">
+    <h2>Управление пользователями</h2>
+  </div>
+  <div class="col-md-4 text-end">
+    <button
+      class="btn btn-success"
+      data-bs-toggle="modal"
+      data-bs-target="#userModal"
+    >
+      Добавить пользователя
+    </button>
+  </div>
+</div>
+
+<div class="row mb-3">
+  <div class="col-md-12">
+    <input
+      type="text"
+      class="form-control"
+      id="searchUsers"
+      placeholder="Поиск по имени или email"
+    />
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Имя пользователя</th>
+        <th>ФИО</th>
+        <th>Роль</th>
+        <th>Статус</th>
+        <th>Должность</th>
+        <th>Действия</th>
+      </tr>
+    </thead>
+    <tbody id="usersTableBody">
+      <tr>
+        <td colspan="7" class="text-center">Загрузка...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- User Modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="userModalTitle">Добавить пользователя</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <!-- Внутри modal-body -->
+        <form id="userForm">
+          <!-- login = email или логин (у тебя это "Email") -->
+          <div class="mb-3">
+            <label for="userLogin" class="form-label">Логин (email)</label>
+            <input
+              type="email"
+              class="form-control"
+              id="userLogin"
+              required
+              autocomplete="username"
+            />
+          </div>
+
+          <!-- fullName -->
+          <div class="mb-3">
+            <label for="userFullName" class="form-label">ФИО</label>
+            <input
+              type="text"
+              class="form-control"
+              id="userFullName"
+              required
+            />
+          </div>
+
+          <!-- password -->
+          <div class="mb-3">
+            <label for="userPassword" class="form-label">Пароль</label>
+            <input
+              type="password"
+              class="form-control"
+              id="userPassword"
+              required
+              autocomplete="new-password"
+            />
+          </div>
+
+          <!-- role -->
+          <div class="mb-3">
+            <label for="userRole" class="form-label">Роль</label>
+            <select class="form-control" id="userRole" required>
+              <option value="">Выберите роль</option>
+              <option value="ADMIN">Администратор</option>
+              <option value="MANAGER">Менеджер</option>
+            </select>
+            <div class="mb-3">
+              <label for="userPosition" class="form-label">Должность</label>
+              <input
+                type="text"
+                class="form-control"
+                id="userPosition"
+                placeholder="Например: Менеджер"
+              />
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label for="userStatus" class="form-label">Статус</label>
+            <select class="form-control" id="userStatus">
+              <option value="ACTIVE">Активен</option>
+              <option value="INACTIVE">Неактивен</option>
+            </select>
+          </div>
+
+          <input type="hidden" id="userId" />
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Закрыть
+        </button>
+        <button type="button" class="btn btn-primary" onclick="saveUser()">
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

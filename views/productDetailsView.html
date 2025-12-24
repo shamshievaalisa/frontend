@@ -1,0 +1,35 @@
+<!-- Product Details View -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <button class="btn btn-secondary" onclick="showView('products')">← Назад к списку</button>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 id="productName" class="card-title">Загрузка...</h2>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <p><strong>Категория:</strong> <span id="productCategory">-</span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Цена:</strong> <span id="productPrice">-</span> руб.</p>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <p><strong>Штрихкод:</strong> <span id="productBarcode">-</span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>ID:</strong> <span id="productId">-</span></p>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="addToOrder()">Добавить в заказ</button>
+                <button class="btn btn-warning" id="editProductBtn" style="display: none;" onclick="editProduct()">Редактировать</button>
+                <button class="btn btn-danger" id="deleteProductBtn" style="display: none;" onclick="deleteProduct()">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
